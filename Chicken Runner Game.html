@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chicken Runner Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #87CEEB;
+        }
+        canvas {
+            border: 1px solid #000;
+        }
+        #gameInstructions {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .mobile-controls {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            gap: 20px;
+        }
+        
+        .control-btn {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.7);
+            border: none;
+            border-radius: 50%;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        #startBtn {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            font-size: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            display: none;
+        }
+
+        #resetHighScoreBtn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 10px 20px;
+            background: rgba(255, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-controls {
+                display: flex;
+            }
+            #startBtn {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameInstructions">
+        Tekan SPASI untuk memulai!<br>
+        Tekan tombol PANAH ATAS untuk melompat!<br>
+        Tekan tombol PANAH BAWAH untuk turun lebih cepat<br>
+        Hindari rintangan dan kumpulkan koin emas<br>
+        High Score: ${highScore}
+    </div>
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <button id="startBtn">Tekan untuk Mulai</button>
+    <button id="resetHighScoreBtn">Reset High Score</button>
+    <div class="mobile-controls">
+        <button class="control-btn" id="upBtn">↑</button>
+        <button class="control-btn" id="downBtn">↓</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let score = 0;
+        let highScore = localStorage.getItem('chickenRunnerHighScore') || 0;
+        let chickenImage = new Image();
+        chickenImage.src = 'file-11Cnpk1MVBkjbDzoWBzggZ';
+
+        let chicken = {
+            x: 50,
+            y: canvas.height - 50,
+            width: 50,
+            height: 50,
+            dy: 0,
+            gravity: 0.5,
+            jumpHeight: -10,
+            onGround: true,
+            isJumping: false,
+            jumpCount: 0,
+            maxJumps: 2
+        };
+
+        let obstacles = [];
+        let powerUps = [];
+        let obstacleFrequency = 120;
+        let frame = 0;
+        let gameStarted = false;
+
+        // Tambahkan tipe-tipe rintangan
+        const OBSTACLE_TYPES = {
+            TREE: 'tree',
+            CACTUS: 'cactus',
+            BIRD: 'bird'
+        };
+
+        // Tambahkan variabel untuk mengatur waktu
+        const TIME_STATES = {
+            SUNRISE: 'sunrise',
+            DAY: 'day',
+            SUNSET: 'sunset',
+            NIGHT: 'night'
+        };
+
+        let currentTimeState = TIME_STATES.DAY;
+
+        function drawChicken() {
+            ctx.fillStyle = 'yellow';
+            ctx.beginPath();
+            ctx.arc(chicken.x + chicken.width/2, chicken.y + chicken.height/2, 
+                   chicken.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Gambar mata
+            ctx.fillStyle = 'black';
+            ctx.beginPath();
+            ctx.arc(chicken.x + chicken.width*0.7, chicken.y + chicken.height*0.4, 
+                   5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Gambar paruh
+            ctx.fillStyle = 'orange';
+            ctx.beginPath();
+            ctx.moveTo(chicken.x + chicken.width*0.8, chicken.y + chicken.height*0.5);
+            ctx.lineTo(chicken.x + chicken.width*1.1, chicken.y + chicken.height*0.5);
+            ctx.lineTo(chicken.x + chicken.width*0.8, chicken.y + chicken.height*0.6);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function drawBackground() {
+            let gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            
+            // Tentukan warna berdasarkan waktu
+            switch(currentTimeState) {
+                case TIME_STATES.SUNRISE:
+                    gradient.addColorStop(0, "#FF7F50");  // Coral
+                    gradient.addColorStop(0.5, "#FFA07A"); // Light Salmon
+                    gradient.addColorStop(0.7, "#98FB98"); // Pale Green
+                    
+                    // Gambar background
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Matahari terbit (oranye kemerahan) di kiri bawah
+                    ctx.fillStyle = '#FF4500';
+                    ctx.beginPath();
+                    ctx.arc(100, 300, 40, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Tambahkan efek cahaya matahari
+                    let sunriseGlow = ctx.createRadialGradient(100, 300, 0, 100, 300, 80);
+                    sunriseGlow.addColorStop(0, 'rgba(255, 69, 0, 0.4)');
+                    sunriseGlow.addColorStop(1, 'rgba(255, 69, 0, 0)');
+                    ctx.fillStyle = sunriseGlow;
+                    ctx.beginPath();
+                    ctx.arc(100, 300, 80, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+                    
+                case TIME_STATES.DAY:
+                    gradient.addColorStop(0, "#87CEEB");  // Sky Blue
+                    gradient.addColorStop(0.7, "#90EE90"); // Light Green
+                    
+                    // Gambar background
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Matahari kuning cerah di atas
+                    ctx.fillStyle = '#FFE87C'; // Warna kuning cerah
+                    ctx.beginPath();
+                    ctx.arc(100, 100, 40, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Efek cahaya matahari
+                    let dayGlow = ctx.createRadialGradient(100, 100, 0, 100, 100, 80);
+                    dayGlow.addColorStop(0, 'rgba(255, 255, 0, 0.3)');
+                    dayGlow.addColorStop(1, 'rgba(255, 255, 0, 0)');
+                    ctx.fillStyle = dayGlow;
+                    ctx.beginPath();
+                    ctx.arc(100, 100, 80, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Tambahkan sinar matahari
+                    ctx.save();
+                    ctx.translate(100, 100);
+                    for(let i = 0; i < 12; i++) {
+                        ctx.rotate(Math.PI / 6);
+                        ctx.fillStyle = '#FFE87C';
+                        ctx.beginPath();
+                        ctx.moveTo(45, 0);
+                        ctx.lineTo(70, 0);
+                        ctx.lineTo(57.5, 10);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                    break;
+                    
+                case TIME_STATES.SUNSET:
+                    gradient.addColorStop(0, "#FF6B6B");  // Sunset Red
+                    gradient.addColorStop(0.4, "#FFB347"); // Orange
+                    gradient.addColorStop(0.7, "#90EE90"); // Light Green
+                    
+                    // Gambar background
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Matahari terbenam (oranye)
+                    ctx.fillStyle = '#FFA500';
+                    ctx.beginPath();
+                    ctx.arc(100, 300, 40, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+                    
+                case TIME_STATES.NIGHT:
+                    gradient.addColorStop(0, "#191970");  // Midnight Blue
+                    gradient.addColorStop(0.7, "#4B0082"); // Indigo
+                    
+                    // Gambar background
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Bulan
+                    ctx.fillStyle = '#F0F8FF';
+                    ctx.beginPath();
+                    ctx.arc(100, 100, 30, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Bintang-bintang
+                    for(let i = 0; i < 50; i++) {
+                        ctx.fillStyle = 'white';
+                        ctx.beginPath();
+                        ctx.arc(
+                            Math.random() * canvas.width,
+                            Math.random() * canvas.height * 0.7,
+                            1,
+                            0,
+                            Math.PI * 2
+                        );
+                        ctx.fill();
+                    }
+                    break;
+            }
+        }
+
+        function updateChicken() {
+            chicken.y += chicken.dy;
+            
+            if (!chicken.onGround) {
+                chicken.dy += chicken.gravity;
+            }
+            
+            if (chicken.y + chicken.height >= canvas.height) {
+                chicken.y = canvas.height - chicken.height;
+                chicken.onGround = true;
+                chicken.isJumping = false;
+                chicken.dy = 0;
+                chicken.jumpCount = 0;
+            }
+        }
+
+        function jump() {
+            if (chicken.jumpCount < chicken.maxJumps) {
+                chicken.dy = chicken.jumpHeight;
+                chicken.onGround = false;
+                chicken.isJumping = true;
+                chicken.jumpCount++;
+            }
+        }
+
+        function cancelJump() {
+            if (chicken.isJumping && chicken.dy < 0) {
+                chicken.dy = 0;
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (!gameStarted) {
+                if (e.code === 'Space') {
+                    gameStarted = true;
+                    document.getElementById('gameInstructions').style.display = 'none';
+                    document.getElementById('startBtn').style.display = 'none';
+                }
+                return;
+            }
+
+            switch(e.code) {
+                case 'ArrowUp':
+                    jump();
+                    break;
+                case 'ArrowDown':
+                    cancelJump();
+                    break;
+            }
+        });
+
+        document.getElementById('upBtn').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (!gameStarted) {
+                gameStarted = true;
+                document.getElementById('gameInstructions').style.display = 'none';
+            } else {
+                jump();
+            }
+        });
+
+        document.getElementById('downBtn').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (gameStarted) {
+                cancelJump();
+            }
+        });
+
+        function generateObstacles() {
+            if (frame % obstacleFrequency === 0) {
+                // Pilih tipe rintangan secara acak
+                const types = Object.values(OBSTACLE_TYPES);
+                const randomType = types[Math.floor(Math.random() * types.length)];
+                
+                // Tentukan posisi y berdasarkan tipe
+                let yPosition = canvas.height - 50;
+                if (randomType === OBSTACLE_TYPES.BIRD) {
+                    // Burung terbang di ketinggian acak
+                    yPosition = canvas.height - Math.random() * 200 - 50;
+                }
+
+                let obstacle = {
+                    x: canvas.width,
+                    y: yPosition,
+                    width: 50,
+                    height: 50,
+                    type: randomType,
+                    dx: -5
+                };
+                obstacles.push(obstacle);
+            }
+        }
+
+        function drawObstacles() {
+            obstacles.forEach(obstacle => {
+                switch(obstacle.type) {
+                    case OBSTACLE_TYPES.TREE:
+                        // Gambar pohon
+                        ctx.fillStyle = 'brown';
+                        ctx.fillRect(obstacle.x + 20, obstacle.y - 20, 10, 70);
+                        
+                        ctx.fillStyle = 'green';
+                        ctx.beginPath();
+                        ctx.arc(obstacle.x + 25, obstacle.y - 20, 20, 0, Math.PI * 2);
+                        ctx.fill();
+                        break;
+
+                    case OBSTACLE_TYPES.CACTUS:
+                        // Gambar kaktus
+                        ctx.fillStyle = '#2D5A27';
+                        ctx.fillRect(obstacle.x + 20, obstacle.y - 30, 10, 80);
+                        
+                        // Cabang kaktus
+                        ctx.fillRect(obstacle.x + 10, obstacle.y, 30, 10);
+                        ctx.fillRect(obstacle.x + 10, obstacle.y - 20, 30, 10);
+                        break;
+
+                    case OBSTACLE_TYPES.BIRD:
+                        // Gambar burung
+                        ctx.fillStyle = '#4A4A4A';
+                        
+                        // Badan burung
+                        ctx.beginPath();
+                        ctx.ellipse(obstacle.x + 25, obstacle.y + 25, 20, 15, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Sayap (bergerak)
+                        const wingOffset = Math.sin(frame * 0.3) * 10;
+                        ctx.beginPath();
+                        ctx.moveTo(obstacle.x + 25, obstacle.y + 15);
+                        ctx.lineTo(obstacle.x + 45, obstacle.y + wingOffset);
+                        ctx.lineTo(obstacle.x + 25, obstacle.y + 25);
+                        ctx.fill();
+                        
+                        // Paruh
+                        ctx.fillStyle = 'orange';
+                        ctx.beginPath();
+                        ctx.moveTo(obstacle.x + 40, obstacle.y + 20);
+                        ctx.lineTo(obstacle.x + 50, obstacle.y + 25);
+                        ctx.lineTo(obstacle.x + 40, obstacle.y + 30);
+                        ctx.fill();
+                        break;
+                }
+            });
+        }
+
+        function updateObstacles() {
+            const baseSpeed = -5;
+            const speedIncrease = Math.floor(score / 500); // Setiap 500 poin, kecepatan bertambah
+            
+            obstacles.forEach(obstacle => {
+                obstacle.x += (baseSpeed - speedIncrease);
+            });
+            obstacles = obstacles.filter(obstacle => obstacle.x + obstacle.width > 0);
+        }
+
+        function checkCollision() {
+            obstacles.forEach(obstacle => {
+                if (chicken.x < obstacle.x + obstacle.width &&
+                    chicken.x + chicken.width > obstacle.x &&
+                    chicken.y < obstacle.y + obstacle.height &&
+                    chicken.y + chicken.height > obstacle.y) {
+                    showGameOver();
+                    resetGame();
+                }
+            });
+        }
+
+        function drawScore() {
+            ctx.fillStyle = 'black';
+            ctx.font = '20px Arial';
+            ctx.fillText('Score: ' + score, 10, 30);
+            ctx.fillText('High Score: ' + highScore, 10, 60);
+        }
+
+        function updateScore() {
+            score++;
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('chickenRunnerHighScore', highScore);
+            }
+        }
+
+        function generateCoins() {
+            if (frame % (obstacleFrequency * 5) === 0) {
+                let coin = {
+                    x: canvas.width,
+                    y: canvas.height - Math.random() * 200 - 50, // Posisi y acak
+                    width: 30,
+                    height: 30,
+                    dx: -5,
+                    rotation: 0 // Untuk animasi rotasi
+                };
+                powerUps.push(coin);
+            }
+        }
+
+        function drawCoins() {
+            powerUps.forEach(coin => {
+                ctx.save();
+                ctx.translate(coin.x + coin.width/2, coin.y + coin.height/2);
+                coin.rotation += 0.1; // Rotasi koin
+                ctx.rotate(coin.rotation);
+                
+                // Gambar koin
+                ctx.fillStyle = 'gold';
+                ctx.beginPath();
+                ctx.arc(0, 0, coin.width/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Efek mengkilap
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(-5, -5, coin.width/3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Garis tepi koin
+                ctx.strokeStyle = '#DAA520';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, coin.width/2, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                ctx.restore();
+            });
+        }
+
+        function updateCoins() {
+            powerUps.forEach(coin => {
+                coin.x += coin.dx;
+            });
+            powerUps = powerUps.filter(coin => coin.x + coin.width > 0);
+        }
+
+        function checkCoinCollection() {
+            powerUps.forEach((coin, index) => {
+                if (chicken.x < coin.x + coin.width &&
+                    chicken.x + chicken.width > coin.x &&
+                    chicken.y < coin.y + coin.height &&
+                    chicken.y + chicken.height > coin.y) {
+                    powerUps.splice(index, 1);
+                    score += 50; // Bonus skor untuk mengambil koin
+                }
+            });
+        }
+
+        function resetGame() {
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('chickenRunnerHighScore', highScore);
+            }
+            
+            score = 0;
+            obstacles = [];
+            powerUps = [];
+            chicken.y = canvas.height - 50;
+            chicken.dy = 0;
+            chicken.onGround = true;
+            gameStarted = false;
+            document.getElementById('gameInstructions').style.display = 'block';
+            
+            if (window.innerWidth <= 768) {
+                document.getElementById('startBtn').style.display = 'block';
+            }
+            currentTimeState = TIME_STATES.DAY; // Reset ke siang hari
+            chicken.jumpCount = 0;
+            chicken.onGround = true;
+            chicken.isJumping = false;
+        }
+
+        function updateDifficulty() {
+            obstacleFrequency = Math.max(60, 120 - Math.floor(score / 200)); // Minimal 60 frames antara rintangan
+        }
+
+        function showGameOver() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = 'white';
+            ctx.font = '48px Arial';
+            ctx.fillText('Game Over!', canvas.width/2 - 120, canvas.height/2 - 50);
+            
+            ctx.font = '24px Arial';
+            ctx.fillText('Score: ' + score, canvas.width/2 - 60, canvas.height/2);
+            ctx.fillText('High Score: ' + highScore, canvas.width/2 - 80, canvas.height/2 + 40);
+            
+            if (score === highScore && score > 0) {
+                ctx.fillStyle = 'gold';
+                ctx.fillText('New High Score!', canvas.width/2 - 100, canvas.height/2 + 80);
+            }
+            
+            ctx.fillStyle = 'white';
+            ctx.fillText('Tekan SPASI untuk Main Lagi', canvas.width/2 - 140, canvas.height/2 + 120);
+            
+            if (window.innerWidth <= 768) {
+                document.getElementById('startBtn').style.display = 'block';
+            }
+        }
+
+        function updateTimeState() {
+            if (score > 2000) {
+                const timeStates = [
+                    TIME_STATES.SUNRISE,
+                    TIME_STATES.DAY,
+                    TIME_STATES.SUNSET,
+                    TIME_STATES.NIGHT
+                ];
+                const cycleLength = 500; // Panjang siklus dalam poin
+                const currentCycle = Math.floor((score - 2000) / cycleLength) % timeStates.length;
+                currentTimeState = timeStates[currentCycle];
+            }
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (gameStarted) {
+                updateTimeState();
+            }
+            
+            drawBackground();
+            drawChicken();
+
+            if (gameStarted) {
+                updateChicken();
+                updateDifficulty();
+                generateObstacles();
+                drawObstacles();
+                updateObstacles();
+                generateCoins();
+                drawCoins();
+                updateCoins();
+                checkCollision();
+                checkCoinCollection();
+                updateScore();
+            } else {
+                ctx.fillStyle = 'black';
+                ctx.font = '30px Arial';
+                ctx.fillText('Tekan SPASI untuk Mulai', canvas.width/2 - 150, canvas.height/2);
+            }
+            
+            drawScore();
+            frame++;
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+
+        document.getElementById('startBtn').addEventListener('click', (e) => {
+            if (!gameStarted) {
+                gameStarted = true;
+                document.getElementById('gameInstructions').style.display = 'none';
+                e.target.style.display = 'none';
+            }
+        });
+
+        function resetHighScore() {
+            if (confirm('Apakah Anda yakin ingin mereset high score?')) {
+                highScore = 0;
+                localStorage.setItem('chickenRunnerHighScore', 0);
+                document.getElementById('gameInstructions').innerHTML = `
+                    Tekan SPASI untuk memulai!<br>
+                    Tekan tombol PANAH ATAS untuk melompat (bisa 2 kali lompatan)!<br>
+                    Tekan tombol PANAH BAWAH untuk turun lebih cepat<br>
+                    Hindari rintangan dan kumpulkan koin emas<br>
+                    High Score: ${highScore}
+                `;
+                // Reset game jika sedang berjalan
+                if (gameStarted) {
+                    resetGame();
+                }
+            }
+        }
+
+        document.getElementById('resetHighScoreBtn').addEventListener('click', resetHighScore);
+    </script>
+</body>
+</html>
